@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   AttendanceLog,
   Staff,
@@ -61,6 +61,51 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
   const [editStatus, setEditStatus] = useState<AttendancePunctuality>('PRESENT');
   const [editRemarks, setEditRemarks] = useState('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // Ref to prevent duplicate auto-absent triggers on re-render
+  const hasAutoChecked = useRef(false);
+
+  // Auto Absent Check Logic
+  useEffect(() => {
+    const runAutoAbsentCheck = async () => {
+      if (!staffList.length || hasAutoChecked.current) return;
+      hasAutoChecked.current = true;
+
+      for (const staff of staffList) {
+        // 1. Check if a record already exists in database logs for today
+        const existingRecord = attendanceLogs.find(
+          (log) =>
+            log.userEmail?.toLowerCase() === staff.email?.toLowerCase() &&
+            log.date === todayStr
+        );
+
+        // 2. Skip if data already exists
+        if (existingRecord) {
+          continue;
+        }
+
+        // 3. Push absent record only if no existing data found
+        try {
+          await onSaveManualAttendance({
+            empName: staff.name,
+            userEmail: staff.email,
+            date: todayStr,
+            punctualityStatus: 'ABSENT' as AttendancePunctuality,
+            clockIn: '--',
+            clockOut: '--',
+            remarks: 'Auto-marked absent (No record found)',
+            durationText: 'Full Day Record',
+            createdByAdmin: true,
+            timestamp: Date.now(),
+          });
+        } catch (err) {
+          console.error(`Failed auto-absent record for ${staff.name}:`, err);
+        }
+      }
+    };
+
+    runAutoAbsentCheck();
+  }, [staffList, attendanceLogs, todayStr, onSaveManualAttendance]);
 
   const resetManualForm = () => {
     setSelectedStaffEmail('');
