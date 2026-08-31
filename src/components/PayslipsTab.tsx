@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Staff,
   AttendanceLog,
@@ -10,14 +10,10 @@ import {
   Calculator,
   ReceiptText,
   FileSpreadsheet,
-  UploadCloud,
   FileText,
   Trash2,
   Printer,
-  ShieldCheck,
   Send,
-  Eye,
-  Building,
 } from 'lucide-react';
 import {
   calculateSMEPayroll,
@@ -58,6 +54,8 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
   const [payslipFile, setPayslipFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Print Modal State
   const [selectedPrintPayslip, setSelectedPrintPayslip] = useState<PayslipRecord | null>(null);
 
@@ -68,7 +66,10 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
       (s) => s.email.toLowerCase() === selectedStaffEmail.toLowerCase()
     );
     if (staff && staff.position) {
-      setPosition(staff.position);
+      const posUpper = staff.position.toUpperCase() as StaffPosition;
+      if (posUpper in POSITION_BASE_SALARIES) {
+        setPosition(posUpper);
+      }
     }
   }, [selectedStaffEmail, staffList]);
 
@@ -106,6 +107,20 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
     return calculateSMEPayroll(basic, absentCount, presentCount);
   }, [selectedStaffEmail, position, payPeriod, attendanceLogs]);
 
+  // Helper to read file as Base64 for Firestore storage fallback
+  const readFileAsBase64 = (file: File): Promise<{ fileData: string; contentType: string }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1] || '';
+        resolve({ fileData: base64, contentType: file.type || 'application/pdf' });
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStaffEmail || !payPeriod) {
@@ -120,20 +135,30 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
 
     setIsSubmitting(true);
     try {
-      await onSavePayslip(
-        {
-          staffName,
-          staffEmail: selectedStaffEmail,
-          position: POSITION_LABELS[position] || position,
-          period: payPeriod,
-          amount: payrollCalc.netSalary,
-          uploadedAt: Date.now(),
-          uploadedBy: currentAdminEmail || 'Admin',
-          breakdown: payrollCalc,
-        },
-        payslipFile
-      );
+      let attachmentDetails: { fileData?: string; contentType?: string } = {};
+
+      if (payslipFile) {
+        attachmentDetails = await readFileAsBase64(payslipFile);
+      }
+
+      const payslipPayload: Omit<PayslipRecord, 'key'> = {
+        staffName,
+        staffEmail: selectedStaffEmail,
+        position: POSITION_LABELS[position] || position,
+        period: payPeriod,
+        amount: payrollCalc.netSalary,
+        uploadedAt: Date.now(),
+        uploadedBy: currentAdminEmail || 'Admin',
+        breakdown: payrollCalc,
+        ...attachmentDetails,
+      };
+
+      await onSavePayslip(payslipPayload, payslipFile);
+
       setPayslipFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       showToast('Payslip generated and saved successfully.', 'success');
     } catch (err: any) {
       if (err?.name === 'PayslipSaveCancelled') {
@@ -335,6 +360,7 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
                 Attach External Payslip Document (Optional PDF / Image)
               </label>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept="application/pdf,image/*"
                 onChange={(e) => setPayslipFile(e.target.files?.[0] || null)}
@@ -428,7 +454,6 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
                           : '--'}
                       </td>
                       <td className="p-3 text-right whitespace-nowrap space-x-1.5">
-                        {/* Print Voucher Modal */}
                         <button
                           onClick={() => setSelectedPrintPayslip(record)}
                           className="px-2.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[11px] font-semibold transition inline-flex items-center gap-1 cursor-pointer"
@@ -437,7 +462,6 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
                           <Printer className="w-3 h-3" /> Voucher
                         </button>
 
-                        {/* External File Viewer */}
                         {record.fileData && (
                           <button
                             onClick={() =>
@@ -453,7 +477,6 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
                           </button>
                         )}
 
-                        {/* Delete */}
                         <button
                           onClick={() => {
                             if (
@@ -478,7 +501,6 @@ export const PayslipsTab: React.FC<PayslipsTabProps> = ({
         </div>
       </div>
 
-      {/* Print / Statement Modal */}
       {selectedPrintPayslip && (
         <PrintPayslipModal
           payslip={selectedPrintPayslip}
