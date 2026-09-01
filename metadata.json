@@ -1,0 +1,6 @@
+{
+  "name": "Admin Management System",
+  "description": "Comprehensive enterprise administrative portal for staff management, attendance tracking, SME Malaysia payroll calculation, leave approvals, branch operations, and daily sales & inventory analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
